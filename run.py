@@ -132,14 +132,388 @@ async def test_motor(client, port, name):
     await client.write_gatt_char(MOTOR_CHAR_UUID, motor_stop)
     print(f"모터 {name} 정지!")
 
+
 async def test_external_motor(client, port, name):
-    motor_wedo = bytearray([0x05, 0x00, 0x41, port, 0x64])
-    await client.write_gatt_char(MOTOR_CHAR_UUID, motor_wedo)
-    print(f"외부 모터 {name} 구동!")
+    # BOOST 외부 포트(C, D) 모터 동작 테스트 (A/B와 동일 명령 사용)
+    # 1. 앞으로 구동
+    motor_forward = bytearray([0x08, 0x00, 0x81, port, 0x11, 0x51, 0x01, 0x64])
+    await client.write_gatt_char(MOTOR_CHAR_UUID, motor_forward)
+    print(f"[외부모터 {name}] 앞으로 구동!")
     await asyncio.sleep(1)
-    motor_wedo_stop = bytearray([0x05, 0x00, 0x41, port, 0x00])
-    await client.write_gatt_char(MOTOR_CHAR_UUID, motor_wedo_stop)
-    print(f"외부 모터 {name} 정지!")
+    # 2. 정지
+    motor_stop = bytearray([0x08, 0x00, 0x81, port, 0x11, 0x51, 0x00, 0x00])
+    await client.write_gatt_char(MOTOR_CHAR_UUID, motor_stop)
+    print(f"[외부모터 {name}] 정지!")
+
+
+
+# 메인/테스트 진입점 분리 및 main 함수 정의 보장
+
+import sys
+import asyncio
+from bleak import BleakClient
+from typing import Callable, Awaitable, Optional
+
+# --- process_command를 글로벌 스코프에 정의 (main/voice 모드에서 모두 사용) ---
+async def process_command(
+    client,
+    user_input: str,
+    lego_dance: Optional[Callable[[], Awaitable[None]]] = None,
+    lego_wave: Optional[Callable[[], Awaitable[None]]] = None,
+    lego_flash: Optional[Callable[[], Awaitable[None]]] = None,
+    lego_spin: Optional[Callable[[], Awaitable[None]]] = None,
+    lego_jump_stop: Optional[Callable[[], Awaitable[None]]] = None,
+    lego_rainbow: Optional[Callable[[], Awaitable[None]]] = None,
+    move_with_obstacle_avoid: Optional[Callable[[], Awaitable[None]]] = None
+) -> None:
+    gpt_reply = chat_with_gpt(user_input)
+    print("GPT 응답:", gpt_reply)
+    if not gpt_reply:
+        print("GPT 응답이 비어 있습니다.")
+        return
+    reply = gpt_reply.lower()
+    # 루틴/모터/센서/액션 분기
+    if lego_dance and ("춤" in reply or "dance" in reply):
+        await lego_dance()
+        return
+    if lego_wave and ("파도타기" in reply or "웨이브" in reply or "wave" in reply):
+        await lego_wave()
+        return
+    if lego_flash and ("번개" in reply or "플래시" in reply or "flash" in reply):
+        await lego_flash()
+        return
+    if lego_spin and ("회전" in reply or "스핀" in reply or "spin" in reply):
+        await lego_spin()
+        return
+    if lego_jump_stop and ("점프" in reply or "스톱" in reply or "jump" in reply):
+        await lego_jump_stop()
+        return
+    if lego_rainbow and ("무지개" in reply or "rainbow" in reply):
+        await lego_rainbow()
+        return
+    if move_with_obstacle_avoid and ("장애물" in reply or "거리센서" in reply or "피하기" in reply or "obstacle" in reply):
+        await move_with_obstacle_avoid()
+        return
+    if ("a 모터" in reply and "앞으로" in reply):
+        await test_motor(client, 0x00, "A")
+    elif ("b 모터" in reply and "앞으로" in reply):
+        await test_motor(client, 0x01, "B")
+    elif ("c 모터" in reply and "앞으로" in reply):
+        await test_external_motor(client, 0x32, "C")
+    elif ("d 모터" in reply and "앞으로" in reply):
+        await test_external_motor(client, 0x33, "D")
+    elif ("a 모터" in reply and "정지" in reply):
+        await test_motor(client, 0x00, "A")
+    elif ("b 모터" in reply and "정지" in reply):
+        await test_motor(client, 0x01, "B")
+    elif ("c 모터" in reply and "정지" in reply):
+        await test_external_motor(client, 0x32, "C")
+    elif ("d 모터" in reply and "정지" in reply):
+        await test_external_motor(client, 0x33, "D")
+    elif ("모든 모터" in reply and "앞으로" in reply):
+        await test_motor(client, 0x00, "A")
+        await test_motor(client, 0x01, "B")
+        await test_external_motor(client, 0x32, "C")
+        await test_external_motor(client, 0x33, "D")
+    elif ("모든 모터" in reply and "정지" in reply):
+        await test_motor(client, 0x00, "A")
+        await test_motor(client, 0x01, "B")
+        await test_external_motor(client, 0x32, "C")
+        await test_external_motor(client, 0x33, "D")
+    elif ("자이로 센서 구독" in reply or "틸트 센서 구독" in reply):
+        await client.write_gatt_char(MOTOR_CHAR_UUID, TILT_SENSOR_SUBSCRIBE)
+        print("자이로(틸트) 센서 구독!")
+    elif ("컬러 센서 구독" in reply or "거리 센서 구독" in reply):
+        await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+        print("컬러&거리 센서 구독!")
+    elif ("센서 모두 구독" in reply):
+        await client.write_gatt_char(MOTOR_CHAR_UUID, TILT_SENSOR_SUBSCRIBE)
+        print("자이로(틸트) 센서 구독!")
+        await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+        print("컬러&거리 센서 구독!")
+    elif ("센서 모두 해제" in reply):
+        print("센서 구독 해제 (실제 해제 명령 필요)")
+    elif ("실행할 수 있는 명령이 없습니다" in reply):
+        print("실행할 수 있는 명령이 없습니다.")
+    else:
+        action_keywords = []
+        for kw in ["go_forward", "stop", "turn_left", "play_sound", "back_off"]:
+            if kw in reply:
+                action_keywords.append(kw)
+        if action_keywords:
+            await execute_action_keywords(client, action_keywords)
+        else:
+            print("실행할 수 있는 명령이 없습니다.")
+
+
+
+
+# 진입점: 외부모터 테스트 모드와 일반 모드 분기
+if __name__ == "__main__":
+    # 음성 명령을 받아서 GPT에 전달하고, 결과 명령을 실행하는 간단한 루프
+    import speech_recognition as sr
+    try:
+        if len(sys.argv) > 1 and sys.argv[1] == "test_external_motor":
+            asyncio.run(test_external_motor_main())
+        elif len(sys.argv) > 1 and sys.argv[1] == "voice":
+            print("[음성 명령 모드] LEGO BOOST 허브에 연결 후, 마이크에 대고 명령을 말하면 바로 실행됩니다. (종료: Ctrl+C)")
+            import asyncio
+            async def voice_command_loop():
+                import speech_recognition as sr
+                r = sr.Recognizer()
+                async with BleakClient(HUB_MAC_ADDRESS) as client:
+                    if not client.is_connected:
+                        print("허브와 연결 실패. 음성 명령 실행 불가.")
+                        return
+                    await subscribe_sensors(client)
+                    print("[연결 성공] 음성 명령을 말하세요. (예: '춤', '웨이브', '앞으로', '정지' 등)")
+            from typing import Callable, Awaitable, Optional
+            async def process_command(
+                client,
+                user_input: str,
+                lego_dance: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_wave: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_flash: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_spin: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_jump_stop: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_rainbow: Optional[Callable[[], Awaitable[None]]] = None,
+                move_with_obstacle_avoid: Optional[Callable[[], Awaitable[None]]] = None
+            ) -> None:
+                gpt_reply = chat_with_gpt(user_input)
+                print("GPT 응답:", gpt_reply)
+                if not gpt_reply:
+                    print("GPT 응답이 비어 있습니다.")
+                    return
+                reply = gpt_reply.lower()
+                # 루틴/모터/센서/액션 분기
+                if lego_dance and ("춤" in reply or "dance" in reply):
+                    await lego_dance()
+                    return
+                if lego_wave and ("파도타기" in reply or "웨이브" in reply or "wave" in reply):
+                    await lego_wave()
+                    return
+                if lego_flash and ("번개" in reply or "플래시" in reply or "flash" in reply):
+                    await lego_flash()
+                    return
+                if lego_spin and ("회전" in reply or "스핀" in reply or "spin" in reply):
+                    await lego_spin()
+                    return
+                if lego_jump_stop and ("점프" in reply or "스톱" in reply or "jump" in reply):
+                    await lego_jump_stop()
+                    return
+                if lego_rainbow and ("무지개" in reply or "rainbow" in reply):
+                    await lego_rainbow()
+                    return
+                if move_with_obstacle_avoid and ("장애물" in reply or "거리센서" in reply or "피하기" in reply or "obstacle" in reply):
+                    await move_with_obstacle_avoid()
+                    return
+                if ("a 모터" in reply and "앞으로" in reply):
+                    await test_motor(client, 0x00, "A")
+                elif ("b 모터" in reply and "앞으로" in reply):
+                    await test_motor(client, 0x01, "B")
+                elif ("c 모터" in reply and "앞으로" in reply):
+                    await test_external_motor(client, 0x32, "C")
+                elif ("d 모터" in reply and "앞으로" in reply):
+                    await test_external_motor(client, 0x33, "D")
+                elif ("a 모터" in reply and "정지" in reply):
+                    await test_motor(client, 0x00, "A")
+                elif ("b 모터" in reply and "정지" in reply):
+                    await test_motor(client, 0x01, "B")
+                elif ("c 모터" in reply and "정지" in reply):
+                    await test_external_motor(client, 0x32, "C")
+                elif ("d 모터" in reply and "정지" in reply):
+                    await test_external_motor(client, 0x33, "D")
+                elif ("모든 모터" in reply and "앞으로" in reply):
+                    await test_motor(client, 0x00, "A")
+                    await test_motor(client, 0x01, "B")
+                    await test_external_motor(client, 0x32, "C")
+                    await test_external_motor(client, 0x33, "D")
+                elif ("모든 모터" in reply and "정지" in reply):
+                    await test_motor(client, 0x00, "A")
+                    await test_motor(client, 0x01, "B")
+                    await test_external_motor(client, 0x32, "C")
+                    await test_external_motor(client, 0x33, "D")
+                elif ("자이로 센서 구독" in reply or "틸트 센서 구독" in reply):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, TILT_SENSOR_SUBSCRIBE)
+                    print("자이로(틸트) 센서 구독!")
+                elif ("컬러 센서 구독" in reply or "거리 센서 구독" in reply):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+                    print("컬러&거리 센서 구독!")
+                elif ("센서 모두 구독" in reply):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, TILT_SENSOR_SUBSCRIBE)
+                    print("자이로(틸트) 센서 구독!")
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+                    print("컬러&거리 센서 구독!")
+                elif ("센서 모두 해제" in reply):
+                    print("센서 구독 해제 (실제 해제 명령 필요)")
+                elif ("실행할 수 있는 명령이 없습니다" in reply):
+                    print("실행할 수 있는 명령이 없습니다.")
+                else:
+                    action_keywords = []
+                    for kw in ["go_forward", "stop", "turn_left", "play_sound", "back_off"]:
+                        if kw in reply:
+                            action_keywords.append(kw)
+                    if action_keywords:
+                        await execute_action_keywords(client, action_keywords)
+                    else:
+                        print("실행할 수 있는 명령이 없습니다.")
+                    # main()에서 정의된 루틴 함수들을 voice 루프에 직접 전달
+                    # main()과 동일한 구조로 루프 실행
+                    from types import SimpleNamespace
+                    # voice 모드에서 루틴 함수 정의 (client context 유지)
+                    async def lego_wave():
+                        print("[파도타기(웨이브) 시작]")
+                        LED_PORT = 0x32
+                        LED_COLORS = [0x05, 0x06, 0x07, 0x08, 0x09]
+                        for i in range(10):
+                            color = LED_COLORS[i % len(LED_COLORS)]
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                            if i % 2 == 0:
+                                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                            else:
+                                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                            await asyncio.sleep(0.22)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+                        print("[파도타기 종료]")
+
+                    async def lego_flash():
+                        print("[번개(플래시) 효과 시작]")
+                        LED_PORT = 0x32
+                        for i in range(8):
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x09]))
+                            await asyncio.sleep(0.08)
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x00]))
+                            await asyncio.sleep(0.08)
+                        print("[번개 효과 종료]")
+
+                    async def lego_spin():
+                        print("[회전(스핀) 시작]")
+                        LED_PORT = 0x32
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x07]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                        await asyncio.sleep(1.2)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+                        print("[회전 종료]")
+
+                    async def lego_jump_stop():
+                        print("[점프&스톱 시작]")
+                        LED_PORT = 0x32
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x08]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                        await asyncio.sleep(0.3)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                        await asyncio.sleep(0.3)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+                        print("[점프&스톱 종료]")
+
+                    async def lego_rainbow():
+                        print("[무지개 쇼 시작]")
+                        LED_PORT = 0x32
+                        RAINBOW = [0x05, 0x08, 0x06, 0x07, 0x09]
+                        for color in RAINBOW:
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                            await asyncio.sleep(0.22)
+                        for _ in range(3):
+                            for color in RAINBOW:
+                                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                                await asyncio.sleep(0.12)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x00]))
+                        print("[무지개 쇼 종료]")
+
+                    async def lego_dance():
+                        print("[춤 동작 시작]")
+                        LED_COLORS = [0x05, 0x06, 0x07, 0x08, 0x09]
+                        LED_PORT = 0x32
+                        for i in range(5):
+                            print("[댄스1] 왼쪽(A) 앞으로, 오른쪽(B) 뒤로")
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[i%len(LED_COLORS)]]))
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                            await asyncio.sleep(0.35)
+                            print("[댄스1] 왼쪽(A) 뒤로, 오른쪽(B) 앞으로")
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[(i+1)%len(LED_COLORS)]]))
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                            await asyncio.sleep(0.35)
+                        print("[댄스2] 제자리 빠른 회전!")
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[2]]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                        await asyncio.sleep(0.5)
+                        print("[댄스3] 점프! (양쪽 역방향)")
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[3]]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                        await asyncio.sleep(0.3)
+                        print("[댄스4] 좌우 진동!")
+                        for j in range(8):
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[j%len(LED_COLORS)]]))
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x32]))
+                            await asyncio.sleep(0.13)
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0xCE]))
+                            await asyncio.sleep(0.13)
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x32]))
+                            await asyncio.sleep(0.13)
+                            await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0xCE]))
+                            await asyncio.sleep(0.13)
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[4]]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+                        print("[춤 동작 종료]")
+
+                    async def move_with_obstacle_avoid():
+                        print("[장애물 감지 이동 시작]")
+                        LED_PORT = 0x32
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+                        print("거리 센서 구독!")
+                        # 실제 장애물 회피 로직은 main()과 동일하게 구현 가능
+                        print("[voice] 장애물 감지 이동은 main()과 동일하게 동작합니다.")
+
+                    # 음성 명령 루프
+                    while True:
+                        with sr.Microphone() as source:
+                            print("음성 인식 대기 중...")
+                            audio = r.listen(source, timeout=5, phrase_time_limit=5)
+                        try:
+                            voice_text = r.recognize_google(audio, language="ko-KR")
+                            print(f"[음성 인식 결과] {voice_text}")
+                        except sr.UnknownValueError:
+                            print("음성을 인식하지 못했습니다.")
+                            continue
+                        except sr.RequestError as e:
+                            print(f"음성 인식 서비스 오류: {e}")
+                            continue
+                        await process_command(
+                            client, voice_text,
+                            lego_dance=lego_dance,
+                            lego_wave=lego_wave,
+                            lego_flash=lego_flash,
+                            lego_spin=lego_spin,
+                            lego_jump_stop=lego_jump_stop,
+                            lego_rainbow=lego_rainbow,
+                            move_with_obstacle_avoid=move_with_obstacle_avoid
+                        )
+            asyncio.run(voice_command_loop())
+        else:
+            # main 함수가 if __name__ == "__main__" 블록보다 아래에 정의되어 있어 참조 불가 오류가 발생함
+            # main 함수 정의를 이 블록보다 위로 옮기거나, 여기서 임포트/정의가 보장되도록 수정 필요
+            # main 함수가 위에 정의되어 있으므로 바로 호출
+            asyncio.run(main())
+    except Exception as e:
+        print("[오류] 프로그램 실행 중 예외가 발생했습니다:")
+        print(e)
+        if "disconnected" in str(e).lower():
+            print("\n허브와의 연결이 끊어졌습니다. 전원을 확인하고, 가까이에서 다시 실행해 주세요.")
+        else:
+            print("\n허브의 전원 및 연결 상태를 확인하고, 다시 실행해 주세요.")
 
 import os
 import openai
@@ -360,59 +734,48 @@ async def main():
             # (중복 구독 제거: subscribe_sensors에서 이미 처리)
 
             print("[테스트 완료] 이제 명령을 입력해 직접 제어해보세요.\n")
-            while True:
-                user_input = input("명령을 입력하세요 (또는 '음성' 입력 후 말하기): ")
-                if user_input.lower() == "exit":
-                    break
-                if user_input.lower() == "음성":
-                    r = sr.Recognizer()
-                    with sr.Microphone() as source:
-                        print("음성 인식 대기 중... '춤'이라고 말해보세요.")
-                        audio = r.listen(source, timeout=5, phrase_time_limit=3)
-                    try:
-                        voice_text = r.recognize_google(audio, language="ko-KR")
-                        print(f"[음성 인식 결과] {voice_text}")
-                        user_input = voice_text
-                    except sr.UnknownValueError:
-                        print("음성을 인식하지 못했습니다.")
-                        continue
-                    except sr.RequestError as e:
-                        print(f"음성 인식 서비스 오류: {e}")
-                        continue
 
+            # process_command 함수 정의를 main 함수 내부로 이동
+            from typing import Callable, Awaitable, Optional
+            async def process_command(
+                client,
+                user_input: str,
+                lego_dance: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_wave: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_flash: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_spin: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_jump_stop: Optional[Callable[[], Awaitable[None]]] = None,
+                lego_rainbow: Optional[Callable[[], Awaitable[None]]] = None,
+                move_with_obstacle_avoid: Optional[Callable[[], Awaitable[None]]] = None
+            ) -> None:
                 gpt_reply = chat_with_gpt(user_input)
                 print("GPT 응답:", gpt_reply)
-
-                # gpt_reply가 None일 경우 대비
                 if not gpt_reply:
                     print("GPT 응답이 비어 있습니다.")
-                    continue
-
-                # 명령어를 소문자로 변환하여 파싱 (대소문자 구분 없이)
-                reply = gpt_reply.lower() if gpt_reply else ""
-
-                # 1. 루틴/모터/센서 명령 기존 분기
-                if "춤" in reply or "dance" in reply:
+                    return
+                reply = gpt_reply.lower()
+                # 루틴/모터/센서/액션 분기
+                if lego_dance and ("춤" in reply or "dance" in reply):
                     await lego_dance()
-                    continue
-                if "파도타기" in reply or "웨이브" in reply or "wave" in reply:
+                    return
+                if lego_wave and ("파도타기" in reply or "웨이브" in reply or "wave" in reply):
                     await lego_wave()
-                    continue
-                if "번개" in reply or "플래시" in reply or "flash" in reply:
+                    return
+                if lego_flash and ("번개" in reply or "플래시" in reply or "flash" in reply):
                     await lego_flash()
-                    continue
-                if "회전" in reply or "스핀" in reply or "spin" in reply:
+                    return
+                if lego_spin and ("회전" in reply or "스핀" in reply or "spin" in reply):
                     await lego_spin()
-                    continue
-                if "점프" in reply or "스톱" in reply or "jump" in reply:
+                    return
+                if lego_jump_stop and ("점프" in reply or "스톱" in reply or "jump" in reply):
                     await lego_jump_stop()
-                    continue
-                if "무지개" in reply or "rainbow" in reply:
+                    return
+                if lego_rainbow and ("무지개" in reply or "rainbow" in reply):
                     await lego_rainbow()
-                    continue
-                if "장애물" in reply or "거리센서" in reply or "피하기" in reply or "obstacle" in reply:
+                    return
+                if move_with_obstacle_avoid and ("장애물" in reply or "거리센서" in reply or "피하기" in reply or "obstacle" in reply):
                     await move_with_obstacle_avoid()
-                    continue
+                    return
                 if ("a 모터" in reply and "앞으로" in reply):
                     await test_motor(client, 0x00, "A")
                 elif ("b 모터" in reply and "앞으로" in reply):
@@ -451,13 +814,10 @@ async def main():
                     await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
                     print("컬러&거리 센서 구독!")
                 elif ("센서 모두 해제" in reply):
-                    # 센서 해제 명령 예시 (실제 해제 명령은 허브 프로토콜에 따라 다를 수 있음)
                     print("센서 구독 해제 (실제 해제 명령 필요)")
                 elif ("실행할 수 있는 명령이 없습니다" in reply):
                     print("실행할 수 있는 명령이 없습니다.")
                 else:
-                    # 2. action keyword가 포함된 경우 execute_action_keywords로 실행
-                    # 예시: reply에 'go_forward', 'stop', 'turn_left', 'play_sound', 'back_off' 등 포함 시
                     action_keywords = []
                     for kw in ["go_forward", "stop", "turn_left", "play_sound", "back_off"]:
                         if kw in reply:
@@ -467,6 +827,37 @@ async def main():
                     else:
                         print("실행할 수 있는 명령이 없습니다.")
 
+            while True:
+                user_input = input("명령을 입력하세요 (또는 '음성' 입력 후 말하기): ")
+                if user_input.lower() == "exit":
+                    break
+                if user_input.lower() == "음성":
+                    r = sr.Recognizer()
+                    with sr.Microphone() as source:
+                        print("음성 인식 대기 중... '춤'이라고 말해보세요.")
+                        audio = r.listen(source, timeout=5, phrase_time_limit=3)
+                    try:
+                        voice_text = r.recognize_google(audio, language="ko-KR")
+                        print(f"[음성 인식 결과] {voice_text}")
+                        user_input = voice_text
+                    except sr.UnknownValueError:
+                        print("음성을 인식하지 못했습니다.")
+                        continue
+                    except sr.RequestError as e:
+                        print(f"음성 인식 서비스 오류: {e}")
+                        continue
+
+                await process_command(
+                    client, user_input,
+                    lego_dance=lego_dance,
+                    lego_wave=lego_wave,
+                    lego_flash=lego_flash,
+                    lego_spin=lego_spin,
+                    lego_jump_stop=lego_jump_stop,
+                    lego_rainbow=lego_rainbow,
+                    move_with_obstacle_avoid=move_with_obstacle_avoid
+                )
+
     # async with 블록 종료 후 연결 실패 메시지
     if not client.is_connected:
         print("허브와 연결 실패.")
@@ -474,10 +865,150 @@ async def main():
     else:
         print("허브와 연결 실패.")
 
+## 진입점: 외부모터 테스트 모드와 일반 모드 분기 (main 함수 정의 이후로 이동)
+
+# main 함수 정의가 파일 상단에 오도록 이동
+
+
+def main_voice_mode():
+    import asyncio
+    import speech_recognition as sr
+    async def voice_loop():
+        async with BleakClient(HUB_MAC_ADDRESS) as client:
+            if not client.is_connected:
+                print("허브와 연결 실패. 음성 명령 실행 불가.")
+                return
+            await subscribe_sensors(client)
+            print("[연결 성공] 음성 명령을 말하세요. (예: '춤', '웨이브', '앞으로', '정지' 등)")
+            # 루틴 함수 정의 (client context 유지)
+            async def lego_wave():
+                LED_PORT = 0x32
+                LED_COLORS = [0x05, 0x06, 0x07, 0x08, 0x09]
+                for i in range(10):
+                    color = LED_COLORS[i % len(LED_COLORS)]
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                    if i % 2 == 0:
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                    else:
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                    await asyncio.sleep(0.22)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+            async def lego_flash():
+                LED_PORT = 0x32
+                for i in range(8):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x09]))
+                    await asyncio.sleep(0.08)
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x00]))
+                    await asyncio.sleep(0.08)
+            async def lego_spin():
+                LED_PORT = 0x32
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x07]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                await asyncio.sleep(1.2)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+            async def lego_jump_stop():
+                LED_PORT = 0x32
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x08]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                await asyncio.sleep(0.3)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                await asyncio.sleep(0.3)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+            async def lego_rainbow():
+                LED_PORT = 0x32
+                RAINBOW = [0x05, 0x08, 0x06, 0x07, 0x09]
+                for color in RAINBOW:
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                    await asyncio.sleep(0.22)
+                for _ in range(3):
+                    for color in RAINBOW:
+                        await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, color]))
+                        await asyncio.sleep(0.12)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, 0x00]))
+            async def lego_dance():
+                LED_COLORS = [0x05, 0x06, 0x07, 0x08, 0x09]
+                LED_PORT = 0x32
+                for i in range(5):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[i%len(LED_COLORS)]]))
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                    await asyncio.sleep(0.35)
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[(i+1)%len(LED_COLORS)]]))
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                    await asyncio.sleep(0.35)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[2]]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x64]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x64]))
+                await asyncio.sleep(0.5)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[3]]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x9C]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x9C]))
+                await asyncio.sleep(0.3)
+                for j in range(8):
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[j%len(LED_COLORS)]]))
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0x32]))
+                    await asyncio.sleep(0.13)
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x01, 0xCE]))
+                    await asyncio.sleep(0.13)
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0x32]))
+                    await asyncio.sleep(0.13)
+                    await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x01, 0xCE]))
+                    await asyncio.sleep(0.13)
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, LED_PORT, 0x11, 0x51, 0x00, LED_COLORS[4]]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x00, 0x11, 0x51, 0x00, 0x00]))
+                await client.write_gatt_char(MOTOR_CHAR_UUID, bytearray([0x08, 0x00, 0x81, 0x01, 0x11, 0x51, 0x00, 0x00]))
+            async def move_with_obstacle_avoid():
+                LED_PORT = 0x32
+                await client.write_gatt_char(MOTOR_CHAR_UUID, COLOR_DISTANCE_SENSOR_SUBSCRIBE)
+            r = sr.Recognizer()
+            while True:
+                with sr.Microphone() as source:
+                    print("음성 인식 대기 중...")
+                    audio = r.listen(source, timeout=5, phrase_time_limit=5)
+                try:
+                    voice_text = r.recognize_google(audio, language="ko-KR")
+                    print(f"[음성 인식 결과] {voice_text}")
+                except sr.UnknownValueError:
+                    print("음성을 인식하지 못했습니다.")
+                    continue
+                except sr.RequestError as e:
+                    print(f"음성 인식 서비스 오류: {e}")
+                    continue
+                await process_command(
+                    client, voice_text,
+                    lego_dance=lego_dance,
+                    lego_wave=lego_wave,
+                    lego_flash=lego_flash,
+                    lego_spin=lego_spin,
+                    lego_jump_stop=lego_jump_stop,
+                    lego_rainbow=lego_rainbow,
+                    move_with_obstacle_avoid=move_with_obstacle_avoid
+                )
+    asyncio.run(voice_loop())
+
 if __name__ == "__main__":
+    import speech_recognition as sr
     try:
-        asyncio.run(main())
+        if len(sys.argv) > 1 and sys.argv[1] == "test_external_motor":
+            asyncio.run(test_external_motor_main())
+        elif len(sys.argv) > 1 and sys.argv[1] == "voice":
+            print("[음성 명령 모드] LEGO BOOST 허브에 연결 후, 마이크에 대고 명령을 말하면 바로 실행됩니다. (종료: Ctrl+C)")
+            main_voice_mode()
+        else:
+            asyncio.run(main())
     except Exception as e:
         print("[오류] 프로그램 실행 중 예외가 발생했습니다:")
         print(e)
-        print("\n허브의 전원 및 연결 상태를 확인하고, 다시 실행해 주세요.")
+        if "disconnected" in str(e).lower():
+            print("\n허브와의 연결이 끊어졌습니다. 전원을 확인하고, 가까이에서 다시 실행해 주세요.")
+        else:
+            print("\n허브의 전원 및 연결 상태를 확인하고, 다시 실행해 주세요.")
